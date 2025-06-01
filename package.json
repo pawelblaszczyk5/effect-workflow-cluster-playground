@@ -4,9 +4,7 @@
   "description": "",
   "type": "module",
   "scripts": {
-    "start-client": "node --disable-warning=ExperimentalWarning client.ts",
-    "start-shard-manager": "node --disable-warning=ExperimentalWarning shard-manager.ts",
-    "start-runner": "node --disable-warning=ExperimentalWarning runner.ts"
+    "start": "./run-cluster.sh"
   },
   "keywords": [],
   "author": "",
