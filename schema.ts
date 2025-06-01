@@ -17,6 +17,15 @@ export const EmailSender = Entity.make("EmailSender", [
   Rpc.make("Send", {
     payload: {
       to: Schema.String,
+      id: Schema.String,
+    },
+    success: Schema.Void,
+    error: Schema.Never,
+  }),
+  Rpc.make("ConfirmDelivery", {
+    payload: {
+      to: Schema.String,
+      id: Schema.String,
     },
     success: Schema.Void,
     error: Schema.Never,

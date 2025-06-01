@@ -8,15 +8,16 @@ const RunnerLive = NodeClusterRunnerSocket.layer({
   storage: "sql",
 }).pipe(Layer.provide(SqlLayer));
 
+const id = "26c4bed0-16f0-4f2d-9203-ec6241b812a5";
+
 const program = Effect.gen(function* () {
-  const id = Math.floor(Math.random() * 1000);
   const entityId = `email-sender-${id}`;
 
   const emailSender = yield* EmailSender.client.pipe(
     Effect.map((getEmailSender) => getEmailSender(entityId))
   );
 
-  yield* emailSender.Send({ to: `test-${id}@example.com` });
+  yield* emailSender.ConfirmDelivery({ to: `test-${id}@example.com`, id });
 });
 
 const replicatedProgram = Effect.all(Effect.replicate(program, 5), {

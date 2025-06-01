@@ -7,7 +7,7 @@ import { NodeClusterRunnerSocket, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer, Option, Schema } from "effect";
 import { SqlLayer } from "./sql.ts";
 import { Counter, EmailSender, EmailWorkflow } from "./schema.ts";
-import { Activity, DurableClock } from "@effect/workflow";
+import { Activity, DurableDeferred } from "@effect/workflow";
 
 const CounterLive = Counter.toLayer(
   Effect.gen(function* () {
@@ -19,17 +19,29 @@ const CounterLive = Counter.toLayer(
   })
 );
 
+const EmailSenderDeliveryDurableDeferred = DurableDeferred.make(
+  "EmailSenderDelivery"
+);
+
 const EmailSenderLive = EmailSender.toLayer(
   Effect.gen(function* () {
     return {
       Send: Effect.fn(function* (envelope) {
-        yield* EmailWorkflow.execute(
+        yield* EmailWorkflow.execute(envelope.payload, { discard: true });
+      }),
+      ConfirmDelivery: Effect.fn(function* (envelop) {
+        const durableDeferredToken = yield* DurableDeferred.tokenFromPayload(
+          EmailSenderDeliveryDurableDeferred,
           {
-            to: envelope.payload.to,
-            id: crypto.randomUUID(),
-          },
-          { discard: true }
+            workflow: EmailWorkflow,
+            payload: envelop.payload,
+          }
         );
+
+        yield* DurableDeferred.succeed(EmailSenderDeliveryDurableDeferred, {
+          token: durableDeferredToken,
+          value: undefined,
+        });
       }),
     };
   })
@@ -56,18 +68,15 @@ const EmailWorkflowLive = EmailWorkflow.toLayer(
       }),
     });
 
-    yield* Effect.log("Sleeping for 2 minutes");
-    yield* DurableClock.sleep({
-      name: "Waiting after sending",
-      duration: "2 minutes",
-    });
-    yield* Effect.log("Woke up");
+    yield* DurableDeferred.await(EmailSenderDeliveryDurableDeferred).pipe(
+      Effect.tap(Effect.log("Awaiting delivery confirmation"))
+    );
 
     yield* Activity.make({
       name: "EmailDeliveryNotification",
       error: Schema.Never,
       execute: Effect.gen(function* () {
-        yield* Effect.log("Email should be delivered by now");
+        yield* Effect.log("Email is confirmed to be delivered by now");
       }),
     });
   })
