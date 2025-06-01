@@ -3,11 +3,103 @@ import {
   RunnerAddress,
   Singleton,
 } from "@effect/cluster";
-import { NodeClusterRunnerSocket, NodeRuntime } from "@effect/platform-node";
+import {
+  NodeClusterRunnerSocket,
+  NodeRuntime,
+  NodeHttpServer,
+} from "@effect/platform-node";
 import { Effect, Layer, Option, Schema } from "effect";
 import { SqlLayer } from "./sql.ts";
 import { Counter, EmailSender, EmailWorkflow } from "./schema.ts";
 import { Activity, DurableDeferred } from "@effect/workflow";
+import {
+  HttpApi,
+  HttpApiBuilder,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiSwagger,
+  HttpMiddleware,
+} from "@effect/platform";
+import { createServer } from "node:http";
+
+const index = Number(process.argv[2]);
+
+const WorkflowProxyApi = HttpApi.make("WorkflowProxyApi").add(
+  HttpApiGroup.make("Email")
+    .add(
+      HttpApiEndpoint.post("send")`/send`
+        .setPayload(
+          Schema.Struct({
+            id: Schema.String,
+          })
+        )
+        .addSuccess(Schema.Null)
+    )
+    .add(
+      HttpApiEndpoint.post("confirm-delivery")`/confirm-delivery`
+        .setPayload(
+          Schema.Struct({
+            id: Schema.String,
+          })
+        )
+        .addSuccess(Schema.Null)
+    )
+);
+
+const WorkflowProxyApiLive = HttpApiBuilder.group(
+  WorkflowProxyApi,
+  "Email",
+  (handlers) =>
+    handlers
+      .handle(
+        "send",
+        Effect.fn(function* (request) {
+          const entityId = `email-sender-${request.payload.id}`;
+
+          const emailSender = yield* EmailSender.client.pipe(
+            Effect.map((getEmailSender) => getEmailSender(entityId))
+          );
+
+          yield* emailSender
+            .Send({
+              id: request.payload.id,
+              to: `test-${request.payload.id}@example.com`,
+            })
+            .pipe(Effect.orDie);
+
+          return null;
+        })
+      )
+      .handle(
+        "confirm-delivery",
+        Effect.fn(function* (request) {
+          const entityId = `email-sender-${request.payload.id}`;
+
+          const emailSender = yield* EmailSender.client.pipe(
+            Effect.map((getEmailSender) => getEmailSender(entityId))
+          );
+
+          yield* emailSender
+            .ConfirmDelivery({
+              id: request.payload.id,
+              to: `test-${request.payload.id}@example.com`,
+            })
+            .pipe(Effect.orDie);
+
+          return null;
+        })
+      )
+);
+
+const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
+  Layer.provide(HttpApiSwagger.layer()),
+  Layer.provide(
+    HttpApiBuilder.api(WorkflowProxyApi).pipe(
+      Layer.provide(WorkflowProxyApiLive)
+    )
+  ),
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 + index }))
+);
 
 const CounterLive = Counter.toLayer(
   Effect.gen(function* () {
@@ -68,9 +160,9 @@ const EmailWorkflowLive = EmailWorkflow.toLayer(
       }),
     });
 
-    yield* DurableDeferred.await(EmailSenderDeliveryDurableDeferred).pipe(
-      Effect.tap(Effect.log("Awaiting delivery confirmation"))
-    );
+    yield* Effect.log("Awaiting delivery confirmation");
+
+    yield* DurableDeferred.await(EmailSenderDeliveryDurableDeferred);
 
     yield* Activity.make({
       name: "EmailDeliveryNotification",
@@ -82,25 +174,30 @@ const EmailWorkflowLive = EmailWorkflow.toLayer(
   })
 );
 
-const WorkflowEngineLayer = ClusterWorkflowEngine.layer.pipe(
+const WorkflowEngineLive = ClusterWorkflowEngine.layer.pipe(
   Layer.provideMerge(
     NodeClusterRunnerSocket.layer({
       storage: "sql",
       shardingConfig: {
-        runnerAddress: Option.some(RunnerAddress.make("localhost", 34432)),
+        runnerAddress: Option.some(
+          RunnerAddress.make("localhost", 34430 + index)
+        ),
       },
     })
   ),
   Layer.provideMerge(SqlLayer)
 );
 
-const Entities = Layer.mergeAll(CounterLive, CronTest, EmailSenderLive);
+const EntitiesLive = Layer.mergeAll(CounterLive, CronTest, EmailSenderLive);
 
-const Workflows = Layer.mergeAll(EmailWorkflowLive);
+const WorkflowsLive = Layer.mergeAll(EmailWorkflowLive);
 
-const EnvLayer = Entities.pipe(
-  Layer.provide(Workflows),
-  Layer.provide(WorkflowEngineLayer)
+const EnvironmentLive = Layer.mergeAll(
+  EntitiesLive.pipe(
+    Layer.provide(WorkflowsLive),
+    Layer.provide(WorkflowEngineLive)
+  ),
+  ServerLive.pipe(Layer.provide(WorkflowEngineLive))
 );
 
-EnvLayer.pipe(Layer.launch, NodeRuntime.runMain);
+EnvironmentLive.pipe(Layer.launch, NodeRuntime.runMain);
