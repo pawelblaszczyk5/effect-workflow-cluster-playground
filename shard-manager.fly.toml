@@ -1,0 +1,15 @@
+# fly.toml app configuration file generated for workflow-billowing-dream-4303 on 2025-06-02T22:12:02+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'workflow-billowing-dream-4303'
+primary_region = 'waw'
+
+[build]
+  dockerfile = './shard-manager.Dockerfile'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1

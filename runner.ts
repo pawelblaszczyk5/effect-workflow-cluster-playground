@@ -22,8 +22,6 @@ import {
 } from "@effect/platform";
 import { createServer } from "node:http";
 
-const index = Number(process.argv[2]);
-
 const WorkflowProxyApi = HttpApi.make("WorkflowProxyApi").add(
   HttpApiGroup.make("Email")
     .add(
@@ -98,7 +96,7 @@ const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
       Layer.provide(WorkflowProxyApiLive)
     )
   ),
-  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 + index }))
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 8080 }))
 );
 
 const CounterLive = Counter.toLayer(
@@ -180,7 +178,11 @@ const WorkflowEngineLive = ClusterWorkflowEngine.layer.pipe(
       storage: "sql",
       shardingConfig: {
         runnerAddress: Option.some(
-          RunnerAddress.make("localhost", 34430 + index)
+          RunnerAddress.make(`${process.env["FLY_MACHINE_ID"]}.vm.workflow-nameless-sunset-6743.internal`, 34430)
+        ),
+        shardManagerAddress: RunnerAddress.make(
+          "workflow-billowing-dream-4303.internal",
+          8080
         ),
       },
     })

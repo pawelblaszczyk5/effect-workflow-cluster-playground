@@ -1,11 +1,11 @@
 import { PgClient } from "@effect/sql-pg";
-import { Function, Redacted } from "effect";
+import { Config, Function } from "effect";
 
-export const SqlLayer = PgClient.layer({
-  database: "web",
-  username: "postgres",
-  password: Redacted.make("postgres"),
-  host: "localhost",
-  port: 5432,
-  onnotice: Function.constVoid,
+export const SqlLayer = PgClient.layerConfig({
+  database: Config.sync(() => "cluster"),
+  username: Config.sync(() => "cluster"),
+  password: Config.redacted("POSTGRES_PASSWORD"),
+  host: Config.sync(() => "workflow-damp-feather-971.internal"),
+  port: Config.sync(() => 5432),
+  onnotice: Config.sync(() => Function.constVoid),
 });
