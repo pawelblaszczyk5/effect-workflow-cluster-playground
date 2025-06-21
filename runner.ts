@@ -1,99 +1,38 @@
 import {
   ClusterWorkflowEngine,
   RunnerAddress,
-  Singleton,
+  EntityProxy,
+  EntityProxyServer,
+  Entity,
+  ClusterCron,
 } from "@effect/cluster";
 import {
   NodeClusterRunnerSocket,
   NodeRuntime,
   NodeHttpServer,
 } from "@effect/platform-node";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Cron, DateTime, Duration, Effect, Layer, Option, Ref } from "effect";
 import { SqlLayer } from "./sql.ts";
-import { Counter, EmailSender, EmailWorkflow } from "./schema.ts";
-import { Activity, DurableDeferred } from "@effect/workflow";
+import { Counter } from "./schema.ts";
 import {
   HttpApi,
   HttpApiBuilder,
-  HttpApiEndpoint,
-  HttpApiGroup,
   HttpApiSwagger,
   HttpMiddleware,
 } from "@effect/platform";
 import { createServer } from "node:http";
 
-const WorkflowProxyApi = HttpApi.make("WorkflowProxyApi").add(
-  HttpApiGroup.make("Email")
-    .add(
-      HttpApiEndpoint.post("send")`/send`
-        .setPayload(
-          Schema.Struct({
-            id: Schema.String,
-          })
-        )
-        .addSuccess(Schema.Null)
-    )
-    .add(
-      HttpApiEndpoint.post("confirm-delivery")`/confirm-delivery`
-        .setPayload(
-          Schema.Struct({
-            id: Schema.String,
-          })
-        )
-        .addSuccess(Schema.Null)
-    )
-);
-
-const WorkflowProxyApiLive = HttpApiBuilder.group(
-  WorkflowProxyApi,
-  "Email",
-  (handlers) =>
-    handlers
-      .handle(
-        "send",
-        Effect.fn(function* (request) {
-          const entityId = `email-sender-${request.payload.id}`;
-
-          const emailSender = yield* EmailSender.client.pipe(
-            Effect.map((getEmailSender) => getEmailSender(entityId))
-          );
-
-          yield* emailSender
-            .Send({
-              id: request.payload.id,
-              to: `test-${request.payload.id}@example.com`,
-            })
-            .pipe(Effect.orDie);
-
-          return null;
-        })
-      )
-      .handle(
-        "confirm-delivery",
-        Effect.fn(function* (request) {
-          const entityId = `email-sender-${request.payload.id}`;
-
-          const emailSender = yield* EmailSender.client.pipe(
-            Effect.map((getEmailSender) => getEmailSender(entityId))
-          );
-
-          yield* emailSender
-            .ConfirmDelivery({
-              id: request.payload.id,
-              to: `test-${request.payload.id}@example.com`,
-            })
-            .pipe(Effect.orDie);
-
-          return null;
-        })
-      )
+const CounterApi = HttpApi.make("CounterApi").add(
+  EntityProxy.toHttpApiGroup("counter", Counter).prefix("/counter")
 );
 
 const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   Layer.provide(HttpApiSwagger.layer()),
   Layer.provide(
-    HttpApiBuilder.api(WorkflowProxyApi).pipe(
-      Layer.provide(WorkflowProxyApiLive)
+    HttpApiBuilder.api(CounterApi).pipe(
+      Layer.provide(
+        EntityProxyServer.layerHttpApi(CounterApi, "counter", Counter)
+      )
     )
   ),
   Layer.provide(NodeHttpServer.layer(createServer, { port: 8080 }))
@@ -101,76 +40,48 @@ const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
 
 const CounterLive = Counter.toLayer(
   Effect.gen(function* () {
+    const entityAddress = yield* Entity.CurrentAddress;
+
+    yield* Effect.log(`Constructing entity for ${entityAddress.entityId}`);
+
+    yield* Effect.addFinalizer(
+      Effect.fn(function* () {
+        yield* Effect.log(
+          `Deconstructing entity for ${entityAddress.entityId}`
+        );
+      })
+    );
+
+    const value = yield* Ref.make(0);
+
     return {
       Increment: Effect.fn(function* (envelope) {
-        yield* Effect.log("Incrementing", envelope.payload.count);
-      }),
-    };
-  })
-);
+        yield* Effect.log(`Incrementing by ${envelope.payload.count}`);
 
-const EmailSenderDeliveryDurableDeferred = DurableDeferred.make(
-  "EmailSenderDelivery"
-);
-
-const EmailSenderLive = EmailSender.toLayer(
-  Effect.gen(function* () {
-    return {
-      Send: Effect.fn(function* (envelope) {
-        yield* EmailWorkflow.execute(envelope.payload, { discard: true });
-      }),
-      ConfirmDelivery: Effect.fn(function* (envelop) {
-        const durableDeferredToken = yield* DurableDeferred.tokenFromPayload(
-          EmailSenderDeliveryDurableDeferred,
-          {
-            workflow: EmailWorkflow,
-            payload: envelop.payload,
-          }
+        yield* Ref.update(
+          value,
+          (currentValue) => currentValue + envelope.payload.count
         );
+      }),
+      Get: Effect.fn(function* () {
+        yield* Effect.log("Extracting value");
 
-        yield* DurableDeferred.succeed(EmailSenderDeliveryDurableDeferred, {
-          token: durableDeferredToken,
-          value: undefined,
-        });
+        return yield* Ref.get(value);
       }),
     };
-  })
+  }),
+  { maxIdleTime: Duration.minutes(15) }
 );
 
-const CronTest = Singleton.make(
-  "CronTest",
-  Effect.gen(function* () {
-    yield* Effect.log("Starting singleton in cluster");
+const CronTest = ClusterCron.make({
+  name: "CronTest",
+  execute: Effect.gen(function* () {
+    const now = yield* DateTime.now;
 
-    yield* Effect.addFinalizer(() =>
-      Effect.log("Stopping singleton in cluster")
-    );
-  })
-);
-
-const EmailWorkflowLive = EmailWorkflow.toLayer(
-  Effect.fn(function* (payload, executionId) {
-    yield* Activity.make({
-      name: "SendEmail",
-      error: Schema.Never,
-      execute: Effect.gen(function* () {
-        yield* Effect.log("Sending email", payload, executionId);
-      }),
-    });
-
-    yield* Effect.log("Awaiting delivery confirmation");
-
-    yield* DurableDeferred.await(EmailSenderDeliveryDurableDeferred);
-
-    yield* Activity.make({
-      name: "EmailDeliveryNotification",
-      error: Schema.Never,
-      execute: Effect.gen(function* () {
-        yield* Effect.log("Email is confirmed to be delivered by now");
-      }),
-    });
-  })
-);
+    yield* Effect.log(`Cronning at ${DateTime.formatIso(now)}`);
+  }),
+  cron: Cron.unsafeParse("* * * * *"),
+});
 
 const WorkflowEngineLive = ClusterWorkflowEngine.layer.pipe(
   Layer.provideMerge(
@@ -178,7 +89,10 @@ const WorkflowEngineLive = ClusterWorkflowEngine.layer.pipe(
       storage: "sql",
       shardingConfig: {
         runnerAddress: Option.some(
-          RunnerAddress.make(`${process.env["FLY_MACHINE_ID"]}.vm.workflow-nameless-sunset-6743.internal`, 34430)
+          RunnerAddress.make(
+            `${process.env["FLY_MACHINE_ID"]}.vm.workflow-nameless-sunset-6743.internal`,
+            34430
+          )
         ),
         shardManagerAddress: RunnerAddress.make(
           "workflow-billowing-dream-4303.internal",
@@ -190,9 +104,9 @@ const WorkflowEngineLive = ClusterWorkflowEngine.layer.pipe(
   Layer.provideMerge(SqlLayer)
 );
 
-const EntitiesLive = Layer.mergeAll(CounterLive, CronTest, EmailSenderLive);
+const EntitiesLive = Layer.mergeAll(CounterLive, CronTest);
 
-const WorkflowsLive = Layer.mergeAll(EmailWorkflowLive);
+const WorkflowsLive = Layer.empty;
 
 const EnvironmentLive = Layer.mergeAll(
   EntitiesLive.pipe(

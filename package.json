@@ -19,13 +19,13 @@
   },
   "packageManager": "pnpm@10.11.0+sha256.a69e9cb077da419d47d18f1dd52e207245b29cac6e076acedbeb8be3b1a67bd7",
   "dependencies": {
-    "effect": "^3.16.3",
-    "@effect/workflow": "^0.1.2",
-    "@effect/cluster": "^0.37.2",
-    "@effect/platform": "^0.84.4",
-    "@effect/platform-node": "^0.84.2",
-    "@effect/rpc": "^0.61.4",
-    "@effect/sql": "^0.37.4",
-    "@effect/sql-pg": "^0.38.4"
+    "effect": "^3.16.8",
+    "@effect/workflow": "^0.2.4",
+    "@effect/cluster": "^0.39.4",
+    "@effect/platform": "^0.85.2",
+    "@effect/platform-node": "^0.86.4",
+    "@effect/rpc": "^0.62.4",
+    "@effect/sql": "^0.38.2",
+    "@effect/sql-pg": "^0.39.2"
   }
 }
