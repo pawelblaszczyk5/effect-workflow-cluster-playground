@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for workflow-damp-feather-971 on 2025-06-02T22:02:26+02:00
+# fly.toml app configuration file generated for workflow-damp-feather-971 on 2025-06-21T23:14:59+02:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -9,16 +9,16 @@ primary_region = 'waw'
 [build]
 dockerfile = './database.Dockerfile'
 
+[env]
+APP_DB = 'cluster'
+APP_USER = 'cluster'
+PGDATA = '/data/postgres'
+
+[[mounts]]
+source = 'data'
+destination = '/data'
+
 [[vm]]
 memory = '512mb'
 cpu_kind = 'shared'
 cpus = 1
-
-[env]
-APP_DB = "cluster"
-APP_USER = "cluster"
-PGDATA = "/data/postgres"
-
-[mounts]
-source = "data"
-destination = "/data"
