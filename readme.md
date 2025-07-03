@@ -1,6 +1,6 @@
 # Running locally
 
-(you will need to change some values in code - it's adjusted for Fly.io now)
+The code currently it's adjusted for Fly.io - but there's a patch for running it locally `localhost.patch`
 
 Run database:
 

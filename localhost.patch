@@ -1,0 +1,81 @@
+diff --git a/runner.ts b/runner.ts
+index b52cc5b..2abe526 100644
+--- a/runner.ts
++++ b/runner.ts
+@@ -37,6 +37,8 @@ import {
+   WorkflowProxyServer,
+ } from "@effect/workflow";
+ 
++const index = Number(process.argv[2]);
++
+ const RunnerProxyApi = HttpApi.make("RunnerProxyApi")
+   .add(EntityProxy.toHttpApiGroup("counter", Counter).prefix("/counter"))
+   .add(
+@@ -57,7 +59,7 @@ const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
+       )
+     )
+   ),
+-  Layer.provide(NodeHttpServer.layer(createServer, { port: 8080 }))
++  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 + index }))
+ );
+ 
+ const CounterLive = Counter.toLayer(
+@@ -138,14 +140,7 @@ const WorkflowEngineLive = ClusterWorkflowEngine.layer.pipe(
+       storage: "sql",
+       shardingConfig: {
+         runnerAddress: Option.some(
+-          RunnerAddress.make(
+-            `${process.env["FLY_MACHINE_ID"]}.vm.workflow-nameless-sunset-6743.internal`,
+-            34430
+-          )
+-        ),
+-        shardManagerAddress: RunnerAddress.make(
+-          "workflow-billowing-dream-4303.internal",
+-          8080
++          RunnerAddress.make("localhost", 34430 + index)
+         ),
+       },
+     })
+diff --git a/shard-manager.ts b/shard-manager.ts
+index fc04df4..101311a 100644
+--- a/shard-manager.ts
++++ b/shard-manager.ts
+@@ -4,14 +4,7 @@ import {
+ } from "@effect/platform-node";
+ import { Layer } from "effect";
+ import { SqlLayer } from "./sql.ts";
+-import { RunnerAddress } from "@effect/cluster";
+ 
+ NodeClusterShardManagerSocket.layer({
+   storage: "sql",
+-  shardingConfig: {
+-    shardManagerAddress: RunnerAddress.make(
+-      "workflow-billowing-dream-4303.internal",
+-      8080
+-    ),
+-  },
+ }).pipe(Layer.provide(SqlLayer), Layer.launch, NodeRuntime.runMain);
+diff --git a/sql.ts b/sql.ts
+index d40b6d6..6c7ed1b 100644
+--- a/sql.ts
++++ b/sql.ts
+@@ -1,11 +1,11 @@
+ import { PgClient } from "@effect/sql-pg";
+-import { Config, Function } from "effect";
++import { Function, Redacted } from "effect";
+ 
+-export const SqlLayer = PgClient.layerConfig({
+-  database: Config.sync(() => "cluster"),
+-  username: Config.sync(() => "cluster"),
+-  password: Config.redacted("POSTGRES_PASSWORD"),
+-  host: Config.sync(() => "workflow-damp-feather-971.internal"),
+-  port: Config.sync(() => 5432),
+-  onnotice: Config.sync(() => Function.constVoid),
++export const SqlLayer = PgClient.layer({
++  database: "web",
++  username: "postgres",
++  password: Redacted.make("postgres"),
++  host: "localhost",
++  port: 5432,
++  onnotice: Function.constVoid,
+ });
