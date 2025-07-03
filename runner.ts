@@ -11,9 +11,18 @@ import {
   NodeRuntime,
   NodeHttpServer,
 } from "@effect/platform-node";
-import { Cron, DateTime, Duration, Effect, Layer, Option, Ref } from "effect";
+import {
+  Cron,
+  DateTime,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Ref,
+  Schema,
+} from "effect";
 import { SqlLayer } from "./sql.ts";
-import { Counter } from "./schema.ts";
+import { Counter, SendEmail } from "./schema.ts";
 import {
   HttpApi,
   HttpApiBuilder,
@@ -21,17 +30,30 @@ import {
   HttpMiddleware,
 } from "@effect/platform";
 import { createServer } from "node:http";
+import {
+  Activity,
+  DurableClock,
+  WorkflowProxy,
+  WorkflowProxyServer,
+} from "@effect/workflow";
 
-const CounterApi = HttpApi.make("CounterApi").add(
-  EntityProxy.toHttpApiGroup("counter", Counter).prefix("/counter")
-);
+const RunnerProxyApi = HttpApi.make("RunnerProxyApi")
+  .add(EntityProxy.toHttpApiGroup("counter", Counter).prefix("/counter"))
+  .add(
+    WorkflowProxy.toHttpApiGroup("workflows", [SendEmail]).prefix("/workflows")
+  );
 
 const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   Layer.provide(HttpApiSwagger.layer()),
   Layer.provide(
-    HttpApiBuilder.api(CounterApi).pipe(
+    HttpApiBuilder.api(RunnerProxyApi).pipe(
       Layer.provide(
-        EntityProxyServer.layerHttpApi(CounterApi, "counter", Counter)
+        EntityProxyServer.layerHttpApi(RunnerProxyApi, "counter", Counter)
+      ),
+      Layer.provide(
+        WorkflowProxyServer.layerHttpApi(RunnerProxyApi, "workflows", [
+          SendEmail,
+        ])
       )
     )
   ),
@@ -73,6 +95,33 @@ const CounterLive = Counter.toLayer(
   { maxIdleTime: Duration.minutes(15) }
 );
 
+const SendEmailLive = SendEmail.toLayer(
+  Effect.fn(function* (payload) {
+    yield* Activity.make({
+      name: "TriggerSend",
+      error: Schema.Never,
+      execute: Effect.gen(function* () {
+        yield* Effect.log(`Sending email to ${payload.to}, awaiting delivery`);
+      }),
+    });
+
+    yield* DurableClock.sleep({
+      name: "AwaitDelivery",
+      duration: Duration.minutes(1),
+    });
+
+    yield* Activity.make({
+      name: "NotifyBeingDelivered",
+      error: Schema.Never,
+      execute: Effect.gen(function* () {
+        yield* Effect.log(
+          `Email is confirmed to be delivered to ${payload.to} by now`
+        );
+      }),
+    });
+  })
+);
+
 const CronTest = ClusterCron.make({
   name: "CronTest",
   execute: Effect.gen(function* () {
@@ -106,7 +155,7 @@ const WorkflowEngineLive = ClusterWorkflowEngine.layer.pipe(
 
 const EntitiesLive = Layer.mergeAll(CounterLive, CronTest);
 
-const WorkflowsLive = Layer.empty;
+const WorkflowsLive = Layer.mergeAll(SendEmailLive);
 
 const EnvironmentLive = Layer.mergeAll(
   EntitiesLive.pipe(
